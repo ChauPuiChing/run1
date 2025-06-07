@@ -196,6 +196,10 @@
     </div>
     <script>
         function addRow(distance='', time='', date='') {
+            if (distance <= 0 || time <= 0) {
+                alert("距離和用時必須為正數！");
+                return;
+            }
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><input type="number" min="0.1" step="0.1" value="${distance}" required></td>
@@ -215,22 +219,24 @@
             const s = Math.round((mins - Math.floor(mins)) * 60);
             return h > 0 ? `${h}小時${m}分${s}秒` : `${m}分${s}秒`;
         }
-        function riegel(t1, d1, d2) {
-            return t1 * Math.pow(d2 / d1, 1.06);
+        function riegel(t1, d1, d2, sdi) {
+            const exponent = sdi <= 1.07 ? 1.06 : sdi; // 動態調整指數
+            return t1 * Math.pow(d2 / d1, exponent);
         }
         function calcSDI(records) {
-            if (records.length < 2) {
-                alert("請至少輸入兩筆以上數據以計算疲勞因子！");
-                return 'N/A'; // 無法計算疲勞因子
-            }
             const speeds = records.map(r => r.distance / r.time).filter(s => !isNaN(s) && s > 0);
             if (speeds.length < 2) {
-                alert("數據異常，請檢查輸入！");
+                alert("請至少輸入兩筆以上數據以計算疲勞因子！");
                 return 'N/A';
             }
             const avg = speeds.reduce((a, b) => a + b, 0) / speeds.length;
             const std = Math.sqrt(speeds.reduce((sum, s) => sum + Math.pow(s - avg, 2), 0) / speeds.length);
-            return (std / avg).toFixed(3);
+
+            // 篩選出不超出標準差範圍的速度值
+            const filteredSpeeds = speeds.filter(s => Math.abs(s - avg) <= std);
+            const filteredAvg = filteredSpeeds.reduce((a, b) => a + b, 0) / filteredSpeeds.length;
+            const filteredStd = Math.sqrt(filteredSpeeds.reduce((sum, s) => sum + Math.pow(s - filteredAvg, 2), 0) / filteredSpeeds.length);
+            return (filteredStd / filteredAvg).toFixed(3);
         }
         function getLevel(sdi) {
             sdi = parseFloat(sdi);
@@ -240,9 +246,12 @@
             if (sdi < 0.09) return {level: "良好", desc: "穩定中等，有提升空間"};
             return {level: "待加強", desc: "建議提升穩定性與基本耐力"};
         }
-        function getTrainSuggestion(basePace) {
-            const vt2 = basePace * 1.22;
-            const vt1 = basePace * 1.31;
+        function getTrainSuggestion(basePace, sdi) {
+            if (basePace <= 0 || sdi <= 0) {
+                return "<b>配速建議無法計算，請檢查數據輸入。</b>";
+            }
+            const vt2 = basePace * (1 + (sdi - 1.07) * 0.05 + 0.22); // 動態調整 VT2
+            const vt1 = basePace * (1 + (sdi - 1.07) * 0.05 + 0.31); // 動態調整 VT1
             return `
                 <b>配速訓練區間：</b><br>
                 高強度 (≥VT2)：${vt2.toFixed(2)}/km<br>
@@ -263,29 +272,36 @@
             }
 
             const sdi = calcSDI(records);
+            if (parseFloat(sdi) > 1.07) {
+                alert(`注意：您的疲勞因子 (SDI=${sdi}) 超過 1.07，可能影響配速建議範圍！`);
+            }
             const lev = getLevel(sdi);
 
             document.getElementById('sdi-value').textContent = sdi;
             document.getElementById('resilience-level').textContent = lev.level;
             document.getElementById('resilience-desc').textContent = lev.desc;
 
-            const base = records.reduce((a, b) => (a.distance > 0 && a.time > 0 && a.distance < b.distance) ? a : b);
+            const base = records.reduce((best, current) => {
+                const bestSpeed = best.distance / best.time;
+                const currentSpeed = current.distance / current.time;
+                return Math.abs(currentSpeed - bestSpeed) < Math.abs(bestSpeed - bestSpeed) ? current : best;
+            });
 
-            document.getElementById('pred-5k').textContent = fmtTime(riegel(base.time, base.distance, 5));
-            document.getElementById('pred-10k').textContent = fmtTime(riegel(base.time, base.distance, 10));
-            document.getElementById('pred-half').textContent = fmtTime(riegel(base.time, base.distance, 21.0975));
-            document.getElementById('pred-full').textContent = fmtTime(riegel(base.time, base.distance, 42.195));
+            document.getElementById('pred-5k').textContent = fmtTime(riegel(base.time, base.distance, 5, parseFloat(sdi)));
+            document.getElementById('pred-10k').textContent = fmtTime(riegel(base.time, base.distance, 10, parseFloat(sdi)));
+            document.getElementById('pred-half').textContent = fmtTime(riegel(base.time, base.distance, 21.0975, parseFloat(sdi)));
+            document.getElementById('pred-full').textContent = fmtTime(riegel(base.time, base.distance, 42.195, parseFloat(sdi)));
 
             const pace = base.time / base.distance;
-            document.getElementById('train-box').innerHTML = getTrainSuggestion(pace);
+            document.getElementById('train-box').innerHTML = getTrainSuggestion(pace, parseFloat(sdi));
 
             const labels = ['5K', '10K', '半馬', '全馬'];
             const perfData = [
-                riegel(base.time, base.distance, 5),
-                riegel(base.time, base.distance, 10),
-                riegel(base.time, base.distance, 21.0975),
-                riegel(base.time, base.distance, 42.195)
-            ];
+                riegel(base.time, base.distance, 5, parseFloat(sdi)),
+                riegel(base.time, base.distance, 10, parseFloat(sdi)),
+                riegel(base.time, base.distance, 21.0975, parseFloat(sdi)),
+                riegel(base.time, base.distance, 42.195, parseFloat(sdi))
+            ].filter(x => x > 0 && x < 360); // 限制合理範圍（例如 360 分鐘內）
             if (window.perfChart) window.perfChart.destroy();
             window.perfChart = new Chart(document.getElementById('performance-chart').getContext('2d'), {
                 type: 'line',
@@ -312,6 +328,10 @@
                 top: document.getElementById('result-card').offsetTop - 30, 
                 behavior: 'smooth' 
             });
+        }
+    </script>
+</body>
+</html>
         }
     </script>
 </body>
