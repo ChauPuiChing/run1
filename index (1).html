@@ -223,7 +223,11 @@
                 alert("請至少輸入兩筆以上數據以計算疲勞因子！");
                 return 'N/A'; // 無法計算疲勞因子
             }
-            const speeds = records.map(r => r.distance / r.time);
+            const speeds = records.map(r => r.distance / r.time).filter(s => !isNaN(s) && s > 0);
+            if (speeds.length < 2) {
+                alert("數據異常，請檢查輸入！");
+                return 'N/A';
+            }
             const avg = speeds.reduce((a, b) => a + b, 0) / speeds.length;
             const std = Math.sqrt(speeds.reduce((sum, s) => sum + Math.pow(s - avg, 2), 0) / speeds.length);
             return (std / avg).toFixed(3);
@@ -251,20 +255,30 @@
             const records = trs.map(tr => ({
                 distance: parseFloat(tr.querySelectorAll('input')[0].value),
                 time: parseFloat(tr.querySelectorAll('input')[1].value)
-            }));
-            if (!records.length) { alert("請至少輸入一筆有效數據！"); return; }
+            })).filter(r => r.distance > 0 && r.time > 0);
+
+            if (!records.length) { 
+                alert("請至少輸入一筆有效數據！"); 
+                return; 
+            }
+
             const sdi = calcSDI(records);
             const lev = getLevel(sdi);
+
             document.getElementById('sdi-value').textContent = sdi;
             document.getElementById('resilience-level').textContent = lev.level;
             document.getElementById('resilience-desc').textContent = lev.desc;
-            const base = records.reduce((a, b) => a.distance < b.distance ? a : b);
+
+            const base = records.reduce((a, b) => (a.distance > 0 && a.time > 0 && a.distance < b.distance) ? a : b);
+
             document.getElementById('pred-5k').textContent = fmtTime(riegel(base.time, base.distance, 5));
             document.getElementById('pred-10k').textContent = fmtTime(riegel(base.time, base.distance, 10));
             document.getElementById('pred-half').textContent = fmtTime(riegel(base.time, base.distance, 21.0975));
             document.getElementById('pred-full').textContent = fmtTime(riegel(base.time, base.distance, 42.195));
+
             const pace = base.time / base.distance;
             document.getElementById('train-box').innerHTML = getTrainSuggestion(pace);
+
             const labels = ['5K', '10K', '半馬', '全馬'];
             const perfData = [
                 riegel(base.time, base.distance, 5),
@@ -294,7 +308,10 @@
                 }
             });
             document.getElementById('result-card').style.display = '';
-            window.scrollTo({ top: document.getElementById('result-card').offsetTop - 30, behavior: 'smooth' });
+            window.scrollTo({ 
+                top: document.getElementById('result-card').offsetTop - 30, 
+                behavior: 'smooth' 
+            });
         }
     </script>
 </body>
